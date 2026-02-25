@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environment
+.venv/
+
+# HuggingFace model cache (large files)
+models/
+
+# uv build artefacts
+dist/
+*.egg-info/
+
+# Gradio temp files
+gradio_cached_examples/
+flagged/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
+.DS_Store
