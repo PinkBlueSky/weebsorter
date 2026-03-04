@@ -22,6 +22,12 @@ from anime_tagger.classifiers.wd_tagger import WDTagger
 from anime_tagger.utils.file_ops import safe_copy, sanitize_folder_name
 from anime_tagger.utils.image_utils import get_image_files, load_image_safe
 
+try:
+    from anime_tagger.face_cluster import FaceClusterer
+    _FACE_CLUSTERING_AVAILABLE = True
+except ImportError:
+    _FACE_CLUSTERING_AVAILABLE = False
+
 # ── Category → output subfolder name ─────────────────────────────────────────
 _LABEL_DIR: dict[str, str] = {
     "real_face":    "faces",
@@ -96,7 +102,7 @@ class _State:
     def _reset_fields(self) -> None:
         self.running: bool = False
         self.stop_requested: bool = False
-        self.phase: str = "idle"      # idle | loading | processing | done | stopped | error
+        self.phase: str = "idle"      # idle | loading | processing | clustering | done | stopped | error
         self.current: int = 0
         self.total: int = 0
         self.current_file: str = ""
@@ -107,6 +113,7 @@ class _State:
         self.error_msg: str = ""
         self.proc_start: float = 0.0
         self.img_times: list[float] = []
+        self.face_stats: dict | None = None
 
     def reset(self) -> None:
         with self._lock:
@@ -133,6 +140,8 @@ class _State:
                 f"**Processing {self.current} / {self.total}** ({pct}%){timing}"
                 f" — `{self.current_file}`"
             )
+        if phase == "clustering":
+            return "🔍 Running Stage 3 — face identity clustering…"
         if phase == "done":
             return f"✅ Done! Processed **{self.current}** image(s)."
         if phase == "stopped":
@@ -188,6 +197,18 @@ def _build_summary(state: _State, csv_path: Path) -> str:
         lines.append("")
 
     lines.append(f"📄 **Classification log:** `{csv_path}`")
+
+    if state.face_stats and state.face_stats.get("clustered", 0) > 0:
+        fs = state.face_stats
+        lines.append("")
+        lines.append("### Stage 3 — Face Clustering")
+        lines.append("| Metric | Value |")
+        lines.append("|--------|-------|")
+        lines.append(f"| Real people found    | **{fs.get('people_faces', 0)}** across `faces/` |")
+        lines.append(f"| Cosplayers found     | **{fs.get('people_cosplay', 0)}** across `cosplay/` |")
+        lines.append(f"| Images clustered     | **{fs.get('clustered', 0)}** |")
+        lines.append(f"| No face detected     | **{fs.get('no_face', 0)}** → `unknown_face/` |")
+
     return "\n".join(lines)
 
 
@@ -199,6 +220,7 @@ def _run_worker(
     clip: CLIPClassifier,
     wd: WDTagger,
     state: _State,
+    face_model: str = "buffalo_s",
 ) -> None:
     """
     Runs in a daemon thread.
@@ -259,8 +281,8 @@ def _run_worker(
                 entry.top_level_label = label
                 entry.clip_confidence = f"{conf:.4f}"
 
-                # ── Stage 2: WD Tagger (anime only) ──────────────────────────
-                if label == "anime_art":
+                # ── Stage 2: WD Tagger (anime art and cosplay) ───────────────
+                if label in ("anime_art", "cosplay"):
                     wd_result = wd.tag(img)
                     entry.detected_characters = ";".join(wd_result["characters"])
                     entry.detected_series = ";".join(wd_result["series"])
@@ -272,17 +294,24 @@ def _run_worker(
                     best = wd_result["best_series"]
                     if not best and wd_result["characters"]:
                         best = max(wd_result["characters"], key=wd_result["characters"].get)
-                    series_dir = sanitize_folder_name(best) if best else "unknown"
-                    dst_dir = output_folder / "anime" / series_dir
+
+                    if label == "anime_art":
+                        series_dir = sanitize_folder_name(best) if best else "unknown"
+                        dst_dir = output_folder / "anime" / series_dir
+                        cat_key = f"anime/{series_dir}"
+                    else:  # cosplay
+                        series_dir = sanitize_folder_name(best) if best else "unknown_character"
+                        dst_dir = output_folder / "cosplay" / series_dir
+                        cat_key = f"cosplay/{series_dir}"
                 else:
                     dst_dir = output_folder / _LABEL_DIR[label]
+                    cat_key = label
 
                 # ── Copy file to output ───────────────────────────────────────
                 dst = safe_copy(img_path, dst_dir)  # SAFETY: copy only, never modify source
                 entry.destination_path = str(dst)
 
                 # Track per-category counts
-                cat_key = f"anime/{series_dir}" if label == "anime_art" else label
                 state.category_counts[cat_key] = (
                     state.category_counts.get(cat_key, 0) + 1
                 )
@@ -299,6 +328,15 @@ def _run_worker(
         # ── Export CSV ────────────────────────────────────────────────────────
         csv_path = output_folder / "classification_log.csv"
         _write_csv(state.logs, csv_path)  # SAFETY: copy only, never modify source
+
+        # ── Stage 3: Face identity clustering ─────────────────────────────────
+        if state.phase != "stopped" and _FACE_CLUSTERING_AVAILABLE:
+            state.phase = "clustering"
+            try:
+                clusterer = FaceClusterer(model_name=face_model)
+                state.face_stats = clusterer.run_all(output_folder)
+            except Exception as exc:  # noqa: BLE001
+                state.face_stats = {"error": str(exc)}
 
         if state.phase != "stopped":
             state.phase = "done"
@@ -323,14 +361,14 @@ def build_app(input_folder: Path, output_folder: Path) -> gr.Blocks:
 
     # ── Event handlers ────────────────────────────────────────────────────────
 
-    def _start(_: None = None) -> str:
+    def _start(face_model: str) -> str:
         if state.running:
             return "⚠️ Already running — wait for completion or click Stop."
         state.reset()
         state.running = True
         t = threading.Thread(
             target=_run_worker,
-            args=(input_folder, output_folder, clip, wd, state),
+            args=(input_folder, output_folder, clip, wd, state, face_model),
             daemon=True,
         )
         t.start()
@@ -366,6 +404,12 @@ def build_app(input_folder: Path, output_folder: Path) -> gr.Blocks:
                 f"**Output folder** — `{output_folder}`"
             )
 
+        face_model_radio = gr.Radio(
+            choices=[("Fast (buffalo_s, ~200MB)", "buffalo_s"), ("Accurate (buffalo_l, ~500MB)", "buffalo_l")],
+            value="buffalo_s",
+            label="Face model (used for Stage 3 face clustering)",
+        )
+
         with gr.Row():
             start_btn = gr.Button("▶ Start Processing", variant="primary", scale=3)
             stop_btn  = gr.Button("⏹ Stop", variant="stop", scale=1)
@@ -380,7 +424,7 @@ def build_app(input_folder: Path, output_folder: Path) -> gr.Blocks:
         timer = gr.Timer(value=0.5)
         timer.tick(fn=_poll, outputs=[progress_md, summary_md])
 
-        start_btn.click(fn=_start, inputs=[], outputs=[progress_md])
+        start_btn.click(fn=_start, inputs=[face_model_radio], outputs=[progress_md])
         stop_btn.click(fn=_stop,  inputs=[], outputs=[progress_md])
 
         gr.Markdown(
