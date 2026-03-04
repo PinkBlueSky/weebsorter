@@ -312,7 +312,7 @@ class FaceClusterer:
     def __init__(
         self,
         model_name: str = "buffalo_s",   # or "buffalo_l"
-        eps: float = 0.40,
+        eps: float = 0.50,
         min_samples: int = 1,
         det_size: tuple = (640, 640),    # passed to SCRFD input size
     ) -> None:

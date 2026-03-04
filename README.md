@@ -136,6 +136,8 @@ If a destination file already exists the incoming file is saved as
 - Images where no face is detected move to `unknown_face/`.
 - Results are logged to `face_cluster_log.csv`.
 
+> **Tuning tip:** If the same person ends up in multiple folders, raise `eps` in `face_cluster.py` (default `0.50`, try `0.55`–`0.60`). If different people get merged into the same folder, lower it toward `0.40`.
+
 ---
 
 ## CSV logs
