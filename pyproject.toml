@@ -8,7 +8,7 @@ dependencies = [
     "gradio>=4.44.0",
     "transformers>=4.40.0",
     "torch>=2.2.0",
-    "onnxruntime>=1.17.0",
+    "onnxruntime-directml>=1.17.0",
     "huggingface-hub>=0.22.0",
     "Pillow>=10.2.0",
     "numpy>=1.26.0",
@@ -24,8 +24,15 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["anime_tagger"]
 
+[[tool.uv.index]]
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
+explicit = true
+
 [tool.uv]
 package = true
-# Use PyTorch CPU-only wheels (≈200 MB instead of ≈2.7 GB CUDA build).
-# To switch to CUDA 12.1: change torch-backend to "cu121"
+# CPU-only by default (≈200 MB). For GPU see README.
 torch-backend = "cpu"
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu124" }

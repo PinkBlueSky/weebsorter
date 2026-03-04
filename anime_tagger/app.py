@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import csv
 import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -73,6 +74,19 @@ class _LogEntry:
         }
 
 
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _fmt_dur(seconds: float) -> str:
+    s = int(seconds)
+    if s < 60:
+        return f"{s}s"
+    m, s = divmod(s, 60)
+    if m < 60:
+        return f"{m}m {s:02d}s"
+    h, m = divmod(m, 60)
+    return f"{h}h {m:02d}m"
+
+
 # ── Shared processing state (written by worker thread, read by Gradio timer) ─
 class _State:
     def __init__(self) -> None:
@@ -91,6 +105,8 @@ class _State:
         self.skipped: list[tuple[str, str]] = []
         self.summary_md: str = ""
         self.error_msg: str = ""
+        self.proc_start: float = 0.0
+        self.img_times: list[float] = []
 
     def reset(self) -> None:
         with self._lock:
@@ -107,9 +123,15 @@ class _State:
         if phase == "processing":
             total = self.total or 1
             pct = int(100 * self.current / total)
+            if self.img_times:
+                avg = sum(self.img_times) / len(self.img_times)
+                eta = _fmt_dur((self.total - self.current) * avg)
+                timing = f" — {avg:.2f}s/img — ETA {eta}"
+            else:
+                timing = ""
             return (
-                f"**Processing {self.current} / {self.total}** ({pct}%) "
-                f"— `{self.current_file}`"
+                f"**Processing {self.current} / {self.total}** ({pct}%){timing}"
+                f" — `{self.current_file}`"
             )
         if phase == "done":
             return f"✅ Done! Processed **{self.current}** image(s)."
@@ -138,8 +160,15 @@ def _build_summary(state: _State, csv_path: Path) -> str:
     lines: list[str] = ["## Processing Summary\n"]
     lines.append(f"| Metric | Value |")
     lines.append(f"|--------|-------|")
+    elapsed = time.monotonic() - state.proc_start if state.proc_start else 0.0
+    avg_t = sum(state.img_times) / len(state.img_times) if state.img_times else 0.0
     lines.append(f"| Total processed | **{state.current}** |")
     lines.append(f"| Total skipped   | **{len(state.skipped)}** |")
+    lines.append(f"| Total time      | **{_fmt_dur(elapsed)}** |")
+    if avg_t:
+        lines.append(f"| Avg per image   | **{avg_t:.2f}s** |")
+        lines.append(f"| Fastest image   | **{min(state.img_times):.2f}s** |")
+        lines.append(f"| Slowest image   | **{max(state.img_times):.2f}s** |")
     lines.append("")
 
     if state.category_counts:
@@ -192,6 +221,7 @@ def _run_worker(
         files = get_image_files(input_folder)
         state.total = len(files)
         state.phase = "processing"
+        state.proc_start = time.monotonic()
 
         if not files:
             state.phase = "done"
@@ -206,6 +236,7 @@ def _run_worker(
 
             state.current = i + 1
             state.current_file = img_path.name
+            img_t0 = time.monotonic()
 
             entry = _LogEntry(
                 original_filename=img_path.name,
@@ -262,6 +293,7 @@ def _run_worker(
                 entry.top_level_label = "ERROR"
                 entry.destination_path = f"[ERROR: {reason}]"
 
+            state.img_times.append(time.monotonic() - img_t0)
             state.logs.append(entry)
 
         # ── Export CSV ────────────────────────────────────────────────────────

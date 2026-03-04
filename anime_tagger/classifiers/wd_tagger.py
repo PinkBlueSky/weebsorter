@@ -76,12 +76,14 @@ class WDTagger:
         model_path = hf_hub_download(repo_id=_REPO_ID, filename=_MODEL_FILE)
         tags_path  = hf_hub_download(repo_id=_REPO_ID, filename=_TAGS_FILE)
 
-        # Prefer GPU if CUDAExecutionProvider is available
-        providers = (
-            ["CUDAExecutionProvider", "CPUExecutionProvider"]
-            if "CUDAExecutionProvider" in ort.get_available_providers()
-            else ["CPUExecutionProvider"]
-        )
+        # Prefer GPU: DirectML (Windows) > CUDA > CPU
+        available = ort.get_available_providers()
+        if "DmlExecutionProvider" in available:
+            providers = ["DmlExecutionProvider", "CPUExecutionProvider"]
+        elif "CUDAExecutionProvider" in available:
+            providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+        else:
+            providers = ["CPUExecutionProvider"]
         self._session = ort.InferenceSession(model_path, providers=providers)
 
         self._load_tags(tags_path)

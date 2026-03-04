@@ -108,7 +108,7 @@ If a destination file already exists the incoming file is saved as
 
 ### Stage 2 — WD-ViT-Tagger-v3 (anime only)
 
-- Model: `SmilingWolf/wd-vit-tagger-v3` (ONNX Runtime, CPU by default)
+- Model: `SmilingWolf/wd-vit-tagger-v3` (ONNX Runtime — DirectML GPU on Windows, CPU fallback)
 - Triggered only when Stage 1 returns `anime_art`.
 - Extracts: character tags (≥ 0.70), series/copyright tags (≥ 0.15),
   rating, and top-10 general tags (≥ 0.35).
@@ -147,67 +147,34 @@ They are **never** written to `C:\Users\..\.cache\huggingface\`.
 
 ## GPU acceleration
 
-> **Requirements:** an NVIDIA GPU with up-to-date drivers.
-> AMD and Intel GPUs are not supported by this path.
+The project ships with GPU acceleration enabled out of the box — no CUDA
+Toolkit or cuDNN installation required.
 
-By default the project installs the **CPU-only** PyTorch wheel (~200 MB).
-Switching to GPU cuts processing time significantly on large batches.
+| Component | GPU backend | Requirement |
+|-----------|-------------|-------------|
+| **CLIP** (Stage 1) | PyTorch CUDA 12.4 | NVIDIA GPU + up-to-date drivers |
+| **WD Tagger** (Stage 2) | ONNX Runtime DirectML | Any DirectML-capable GPU (NVIDIA, AMD, Intel) on Windows 10/11 |
 
-### Step 1 — find your CUDA version
+On a typical NVIDIA RTX GPU this gives roughly **3× the throughput** of CPU-only.
 
-Open a terminal and run:
+### If torch reverts to the CPU build
 
-```bat
-nvidia-smi
+`uv sync` can occasionally revert PyTorch to the CPU wheel if the lockfile is
+regenerated without the CUDA index. Verify which build is active:
+
+```powershell
+.venv\Scripts\python.exe -c "import torch; print(torch.__version__); print(torch.cuda.is_available())"
 ```
 
-Look for `CUDA Version: XX.X` in the top-right of the output.
-Common values are `12.1`, `12.4`, `11.8`.
+If the version shows `+cpu` or `cuda.is_available()` returns `False`, force the
+CUDA wheel back in:
 
-### Step 2 — update pyproject.toml
-
-Edit `pyproject.toml` and change `torch-backend`:
-
-```toml
-[tool.uv]
-# CPU (default):
-torch-backend = "cpu"
-
-# CUDA 12.1:
-torch-backend = "cu121"
-
-# CUDA 12.4:
-torch-backend = "cu124"
-
-# CUDA 11.8:
-torch-backend = "cu118"
+```powershell
+uv pip install torch --index-url https://download.pytorch.org/whl/cu124 --reinstall
 ```
 
-Use the value that matches your CUDA version from Step 1.
-
-### Step 3 — swap onnxruntime for the GPU build
-
-In the `[project]` `dependencies` list, replace:
-
-```toml
-"onnxruntime>=1.17.0",
-```
-
-with:
-
-```toml
-"onnxruntime-gpu>=1.17.0",
-```
-
-### Step 4 — reinstall
-
-```bat
-uv sync
-```
-
-`uv sync` will download the CUDA-enabled PyTorch (~2.5 GB) and
-`onnxruntime-gpu`. The WD Tagger will then automatically use
-`CUDAExecutionProvider` and CLIP will run on the GPU via PyTorch.
+This targets CUDA 12.4, which is compatible with any NVIDIA driver that reports
+`CUDA Version: 12.x` or higher in `nvidia-smi`.
 
 ---
 
