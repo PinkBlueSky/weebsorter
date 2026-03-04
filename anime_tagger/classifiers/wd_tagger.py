@@ -38,8 +38,8 @@ _CAT_RATING    = 9
 # ── Score thresholds ──────────────────────────────────────────────────────────
 _THRESH_GENERAL    = 0.35
 _THRESH_CHARACTER  = 0.70
-_THRESH_SERIES     = 0.50
-_THRESH_SERIES_BEST = 0.50   # minimum confidence to name the output subfolder
+_THRESH_SERIES     = 0.15
+_THRESH_SERIES_BEST = 0.20   # minimum confidence to name the output subfolder
 
 # ── Input image size expected by the model ────────────────────────────────────
 _IMAGE_SIZE = 448

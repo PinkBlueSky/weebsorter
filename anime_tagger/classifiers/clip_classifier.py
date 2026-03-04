@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import torch
-from transformers import CLIPModel, CLIPProcessor
+from transformers import CLIPImageProcessor, CLIPModel, CLIPTokenizer
 
 if TYPE_CHECKING:
     from PIL.Image import Image
@@ -27,18 +27,18 @@ _CLIP_MODEL_ID = "openai/clip-vit-large-patch14"
 # "ensembling" technique described in the original CLIP paper (Radford 2021).
 _LABEL_PROMPTS: dict[str, list[str]] = {
     "anime_art": [
-        "a piece of anime artwork or manga illustration in Japanese animation style",
-        "an anime screenshot or cel-shaded anime-style digital illustration",
-        "a 2D Japanese animated character with large stylised eyes and vibrant colours",
-        "manga artwork, doujinshi illustration, or anime key visual",
-        "an illustration in the style of Japanese anime such as Naruto, Sword Art Online, or Attack on Titan",
-        "a hand-drawn or digitally painted anime character on a colourful background",
+        "a 2D drawn anime illustration or manga artwork, not a real photograph",
+        "a hand-drawn or digitally painted Japanese anime style illustration",
+        "an anime or manga image with cel-shading or flat digital art colouring",
+        "2D anime artwork such as a key visual, fan art, or official illustration",
+        "a digital illustration of an anime character with stylised proportions and flat vibrant colours, clearly not a real photo",
+        "drawn anime art in the style of Naruto or Sword Art Online — a 2D illustration, not a photograph",
     ],
     "real_face": [
-        "a photograph or realistic portrait of a real human face",
-        "a selfie or portrait photo of a real person",
-        "a candid or posed photograph showing a real human being's face",
-        "a real-life photo of a human person, not drawn, illustrated, or animated",
+        "a real photograph of a human face or person",
+        "a photo of a real person, including cosplay, anime costumes, and anime-style makeup",
+        "a photograph or selfie of a real human being, not an illustration or drawing",
+        "a portrait or candid photo of a real person, even if they are wearing wigs, costumes, or fictional outfits",
     ],
     "landscape": [
         "an outdoor landscape photograph showing nature scenery",
@@ -84,22 +84,34 @@ class CLIPClassifier:
 
     def __init__(self) -> None:
         self._model: CLIPModel | None = None
-        self._processor: CLIPProcessor | None = None
+        # Use separate image/text processors to avoid processor_config.json
+        # lookup introduced in transformers 5.x — works with both 4.x and 5.x.
+        self._image_processor: CLIPImageProcessor | None = None
+        self._tokenizer: CLIPTokenizer | None = None
         self._class_embeddings: torch.Tensor | None = None
         self._labels: list[str] = list(_LABEL_PROMPTS.keys())
         self._device = "cuda" if torch.cuda.is_available() else "cpu"
 
     def load(self) -> None:
-        """Download (if needed) and load the CLIP model and processor."""
-        if self._model is not None:
+        """Download (if needed) and load the CLIP model and processors."""
+        if self._model is not None and self._class_embeddings is not None:
             return  # Already loaded
 
-        self._processor = CLIPProcessor.from_pretrained(_CLIP_MODEL_ID)
-        self._model = CLIPModel.from_pretrained(_CLIP_MODEL_ID).to(self._device)
-        self._model.eval()
+        try:
+            self._image_processor = CLIPImageProcessor.from_pretrained(_CLIP_MODEL_ID)
+            self._tokenizer = CLIPTokenizer.from_pretrained(_CLIP_MODEL_ID)
+            self._model = CLIPModel.from_pretrained(_CLIP_MODEL_ID).to(self._device)
+            self._model.eval()
 
-        # Pre-compute averaged per-class text embeddings
-        self._class_embeddings = self._build_class_embeddings()
+            # Pre-compute averaged per-class text embeddings
+            self._class_embeddings = self._build_class_embeddings()
+        except Exception:
+            # Reset so the next load() call retries from scratch
+            self._model = None
+            self._image_processor = None
+            self._tokenizer = None
+            self._class_embeddings = None
+            raise
 
     def _build_class_embeddings(self) -> torch.Tensor:
         """
@@ -108,20 +120,21 @@ class CLIPClassifier:
         Returns a tensor of shape [num_classes, embed_dim].
         """
         assert self._model is not None
-        assert self._processor is not None
+        assert self._tokenizer is not None
 
         class_vecs: list[torch.Tensor] = []
 
         with torch.no_grad():
             for label in self._labels:
                 prompts = _LABEL_PROMPTS[label]
-                inputs = self._processor(
+                inputs = self._tokenizer(
                     text=prompts,
                     return_tensors="pt",
                     padding=True,
                     truncation=True,
                 ).to(self._device)
-                text_feats = self._model.get_text_features(**inputs)
+                text_out = self._model.text_model(**inputs)
+                text_feats = self._model.text_projection(text_out.pooler_output)
                 # L2-normalise each prompt embedding
                 text_feats = text_feats / text_feats.norm(dim=-1, keepdim=True)
                 # Average over prompts for this class, then re-normalise
@@ -139,15 +152,16 @@ class CLIPClassifier:
             (label, confidence)  where confidence is the softmax probability.
         """
         assert self._model is not None, "Call load() before classify()"
-        assert self._processor is not None
+        assert self._image_processor is not None
         assert self._class_embeddings is not None
 
         with torch.no_grad():
-            inputs = self._processor(
+            inputs = self._image_processor(
                 images=pil_image,
                 return_tensors="pt",
             ).to(self._device)
-            image_feat = self._model.get_image_features(**inputs)
+            vision_out = self._model.vision_model(**inputs)
+            image_feat = self._model.visual_projection(vision_out.pooler_output)
             image_feat = image_feat / image_feat.norm(dim=-1, keepdim=True)
 
             # Cosine similarity → softmax probabilities

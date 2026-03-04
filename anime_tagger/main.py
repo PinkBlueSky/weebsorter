@@ -114,6 +114,7 @@ def main() -> None:
         server_name="127.0.0.1",
         inbrowser=True,
         share=False,
+        ssr_mode=False,  # Disable SSR to avoid Gradio 6.x httpx client lifecycle errors
     )
 
 

@@ -239,6 +239,8 @@ def _run_worker(
                     )
 
                     best = wd_result["best_series"]
+                    if not best and wd_result["characters"]:
+                        best = max(wd_result["characters"], key=wd_result["characters"].get)
                     series_dir = sanitize_folder_name(best) if best else "unknown"
                     dst_dir = output_folder / "anime" / series_dir
                 else:
@@ -346,8 +348,8 @@ def build_app(input_folder: Path, output_folder: Path) -> gr.Blocks:
         timer = gr.Timer(value=0.5)
         timer.tick(fn=_poll, outputs=[progress_md, summary_md])
 
-        start_btn.click(fn=_start, inputs=[], outputs=[progress_md], queue=False)
-        stop_btn.click(fn=_stop,  inputs=[], outputs=[progress_md], queue=False)
+        start_btn.click(fn=_start, inputs=[], outputs=[progress_md])
+        stop_btn.click(fn=_stop,  inputs=[], outputs=[progress_md])
 
         gr.Markdown(
             "---\n"
@@ -356,5 +358,4 @@ def build_app(input_folder: Path, output_folder: Path) -> gr.Blocks:
             "Models are cached in `./models/` inside the project folder."
         )
 
-    demo.queue()
     return demo

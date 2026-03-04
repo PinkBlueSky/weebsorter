@@ -1,4 +1,4 @@
-# anime-tagger
+# weebsorter
 
 A Windows desktop application that classifies images into top-level categories
 using **CLIP** (openai/clip-vit-large-patch14) and then sub-tags anime art using
@@ -83,8 +83,9 @@ output/
 ├── abstract/
 ├── other/
 ├── anime/
-│   ├── {series_name}/     ← named from the highest-confidence copyright tag
-│   └── unknown/           ← anime images with no series tag above 0.5 threshold
+│   ├── {character_or_series}/   ← named from highest-confidence series tag (≥ 0.20),
+│   │                               falling back to highest-confidence character tag (≥ 0.70)
+│   └── unknown/                 ← anime images where neither series nor character was detected
 └── classification_log.csv
 ```
 
@@ -109,9 +110,14 @@ If a destination file already exists the incoming file is saved as
 
 - Model: `SmilingWolf/wd-vit-tagger-v3` (ONNX Runtime, CPU by default)
 - Triggered only when Stage 1 returns `anime_art`.
-- Extracts: character tags (≥ 0.70), series/copyright tags (≥ 0.50),
+- Extracts: character tags (≥ 0.70), series/copyright tags (≥ 0.15),
   rating, and top-10 general tags (≥ 0.35).
-- The highest-confidence series tag (≥ 0.50) names the output subfolder.
+- **Folder naming priority:**
+  1. Highest-confidence series/copyright tag (≥ 0.20)
+  2. Highest-confidence character tag (≥ 0.70) — used when no series is detected
+  3. `unknown/` — when neither series nor character clears the threshold
+- **Training data cutoff: February 2024.** Characters and series from anime
+  that premiered after that date will not be recognised.
 
 ---
 
@@ -141,20 +147,67 @@ They are **never** written to `C:\Users\..\.cache\huggingface\`.
 
 ## GPU acceleration
 
-By default the project installs the **CPU-only** PyTorch wheel (~200 MB).
-To use a CUDA GPU, edit `pyproject.toml`:
+> **Requirements:** an NVIDIA GPU with up-to-date drivers.
+> AMD and Intel GPUs are not supported by this path.
 
-```toml
-# Change the pytorch index URL from:
-url = "https://download.pytorch.org/whl/cpu"
-# To (CUDA 12.1):
-url = "https://download.pytorch.org/whl/cu121"
+By default the project installs the **CPU-only** PyTorch wheel (~200 MB).
+Switching to GPU cuts processing time significantly on large batches.
+
+### Step 1 — find your CUDA version
+
+Open a terminal and run:
+
+```bat
+nvidia-smi
 ```
 
-Then run `uv sync` again.
+Look for `CUDA Version: XX.X` in the top-right of the output.
+Common values are `12.1`, `12.4`, `11.8`.
 
-The WD Tagger ONNX session automatically uses `CUDAExecutionProvider` if
-`onnxruntime-gpu` is installed and CUDA is available.
+### Step 2 — update pyproject.toml
+
+Edit `pyproject.toml` and change `torch-backend`:
+
+```toml
+[tool.uv]
+# CPU (default):
+torch-backend = "cpu"
+
+# CUDA 12.1:
+torch-backend = "cu121"
+
+# CUDA 12.4:
+torch-backend = "cu124"
+
+# CUDA 11.8:
+torch-backend = "cu118"
+```
+
+Use the value that matches your CUDA version from Step 1.
+
+### Step 3 — swap onnxruntime for the GPU build
+
+In the `[project]` `dependencies` list, replace:
+
+```toml
+"onnxruntime>=1.17.0",
+```
+
+with:
+
+```toml
+"onnxruntime-gpu>=1.17.0",
+```
+
+### Step 4 — reinstall
+
+```bat
+uv sync
+```
+
+`uv sync` will download the CUDA-enabled PyTorch (~2.5 GB) and
+`onnxruntime-gpu`. The WD Tagger will then automatically use
+`CUDAExecutionProvider` and CLIP will run on the GPU via PyTorch.
 
 ---
 
