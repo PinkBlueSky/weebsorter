@@ -130,7 +130,7 @@ If a destination file already exists the incoming file is saved as
   — downloaded automatically as ONNX files, no C++ build tools required.
 - **Detection:** SCRFD face detector locates faces and 5-point landmarks.
 - **Recognition:** ArcFace encodes each face as a 512-dim embedding.
-- **Clustering:** DBSCAN groups embeddings by cosine distance (eps = 0.40)
+- **Clustering:** DBSCAN groups embeddings by cosine distance (eps = 0.50)
   so each cluster = one identity.
 - `faces/` images are reorganised into `person_1/`, `person_2/`, … subfolders.
 - Images where no face is detected move to `unknown_face/`.
