@@ -107,6 +107,7 @@ def main() -> None:
     output_folder.mkdir(parents=True, exist_ok=True)
 
     # Deferred import so HF_HOME is already set when transformers/gradio load.
+    import gradio as gr  # noqa: PLC0415
     from anime_tagger.app import build_app  # noqa: PLC0415
 
     demo = build_app(input_folder, output_folder)
@@ -114,7 +115,8 @@ def main() -> None:
         server_name="127.0.0.1",
         inbrowser=True,
         share=False,
-        ssr_mode=False,  # Disable SSR to avoid Gradio 6.x httpx client lifecycle errors
+        ssr_mode=False,
+        theme=gr.themes.Soft(),
     )
 
 

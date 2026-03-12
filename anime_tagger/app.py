@@ -392,7 +392,7 @@ def build_app(input_folder: Path, output_folder: Path) -> gr.Blocks:
         return text, summary_upd
 
     # ── Layout ────────────────────────────────────────────────────────────────
-    with gr.Blocks(title="Anime Tagger", theme=gr.themes.Soft()) as demo:
+    with gr.Blocks(title="Anime Tagger") as demo:
         gr.Markdown(
             "# 🎌 Anime Tagger\n"
             "Classifies images with CLIP then sub-tags anime art with WD-ViT-Tagger-v3."
