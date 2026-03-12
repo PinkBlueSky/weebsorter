@@ -312,7 +312,7 @@ class FaceClusterer:
     def __init__(
         self,
         model_name: str = "buffalo_s",   # or "buffalo_l"
-        eps: float = 0.50,
+        eps: float = 0.40,
         min_samples: int = 1,
         det_size: tuple = (640, 640),    # passed to SCRFD input size
     ) -> None:
@@ -494,6 +494,56 @@ class FaceClusterer:
             "no_face": len(no_face_entries),
             "csv_rows": csv_rows,
         }
+
+    def _flatten_directory(self, target_dir: Path) -> None:
+        """
+        Move all image files from person_*/ and unknown_face/ subdirs back to
+        target_dir root, then remove the now-empty subdirs.
+        """
+        for sub in sorted(target_dir.iterdir()):
+            if not sub.is_dir():
+                continue
+            if sub.name.startswith("person_") or sub.name == "unknown_face":
+                for img in sub.iterdir():
+                    if img.is_file() and img.suffix.lower() in _SUPPORTED_SUFFIXES:
+                        dst = target_dir / img.name
+                        if dst.exists():
+                            stem, suffix = img.stem, img.suffix
+                            counter = 1
+                            while dst.exists():
+                                dst = target_dir / f"{stem}_{counter}{suffix}"
+                                counter += 1
+                        shutil.move(str(img), str(dst))
+                try:
+                    sub.rmdir()
+                except OSError:
+                    pass  # not empty — leave it
+
+    def recluster_all(
+        self,
+        output_dir: Path,
+        progress_cb=None,
+    ) -> dict:
+        """
+        Re-run Stage 3 on an existing output folder without redoing Stages 1 & 2.
+        Flattens existing person_*/ clusters back to their parent dirs, then
+        re-clusters with the current eps value.
+        """
+        self._output_dir = output_dir
+
+        faces_dir = output_dir / "faces"
+        if faces_dir.exists():
+            if progress_cb:
+                progress_cb("Flattening existing face clusters…")
+            self._flatten_directory(faces_dir)
+
+        cosplay_dir = output_dir / "cosplay"
+        if cosplay_dir.exists():
+            for char_dir in sorted(cosplay_dir.iterdir()):
+                if char_dir.is_dir() and char_dir.name != "unknown_face":
+                    self._flatten_directory(char_dir)
+
+        return self.run_all(output_dir, progress_cb)
 
     def run_all(
         self,

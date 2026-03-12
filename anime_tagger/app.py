@@ -380,6 +380,31 @@ def build_app(input_folder: Path, output_folder: Path) -> gr.Blocks:
         state.stop_requested = True
         return "⏹ Stop requested — finishing current image…"
 
+    def _recluster(face_model: str, eps: float) -> str:
+        if state.running:
+            return "⚠️ Already running — wait for completion or click Stop."
+        if not _FACE_CLUSTERING_AVAILABLE:
+            return "❌ Face clustering unavailable."
+        state.reset()
+        state.running = True
+        state.phase = "clustering"
+
+        def _worker():
+            try:
+                clusterer = FaceClusterer(model_name=face_model, eps=eps)
+                state.face_stats = clusterer.recluster_all(output_folder)
+                csv_path = output_folder / "classification_log.csv"
+                state.summary_md = _build_summary(state, csv_path)
+                state.phase = "done"
+            except Exception as exc:  # noqa: BLE001
+                state.error_msg = str(exc)
+                state.phase = "error"
+            finally:
+                state.running = False
+
+        threading.Thread(target=_worker, daemon=True).start()
+        return "🔍 Re-clustering faces…"
+
     def _poll() -> tuple[str, dict]:
         """Called every 500 ms by gr.Timer to update the UI."""
         text = state.progress_text
@@ -410,9 +435,15 @@ def build_app(input_folder: Path, output_folder: Path) -> gr.Blocks:
             label="Face model (used for Stage 3 face clustering)",
         )
 
+        eps_slider = gr.Slider(
+            minimum=0.30, maximum=0.65, step=0.01, value=0.40,
+            label="Face clustering sensitivity (eps) — lower = stricter, higher = more merged",
+        )
+
         with gr.Row():
-            start_btn = gr.Button("▶ Start Processing", variant="primary", scale=3)
-            stop_btn  = gr.Button("⏹ Stop", variant="stop", scale=1)
+            start_btn     = gr.Button("▶ Start Processing", variant="primary", scale=3)
+            recluster_btn = gr.Button("🔄 Re-cluster Faces", variant="secondary", scale=2)
+            stop_btn      = gr.Button("⏹ Stop", variant="stop", scale=1)
 
         progress_md = gr.Markdown(
             "Ready — click **▶ Start Processing** to begin.",
@@ -425,6 +456,7 @@ def build_app(input_folder: Path, output_folder: Path) -> gr.Blocks:
         timer.tick(fn=_poll, outputs=[progress_md, summary_md])
 
         start_btn.click(fn=_start, inputs=[face_model_radio], outputs=[progress_md])
+        recluster_btn.click(fn=_recluster, inputs=[face_model_radio, eps_slider], outputs=[progress_md])
         stop_btn.click(fn=_stop,  inputs=[], outputs=[progress_md])
 
         gr.Markdown(

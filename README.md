@@ -130,13 +130,13 @@ If a destination file already exists the incoming file is saved as
   — downloaded automatically as ONNX files, no C++ build tools required.
 - **Detection:** SCRFD face detector locates faces and 5-point landmarks.
 - **Recognition:** ArcFace encodes each face as a 512-dim embedding.
-- **Clustering:** DBSCAN groups embeddings by cosine distance (eps = 0.50)
+- **Clustering:** DBSCAN groups embeddings by cosine distance (eps = 0.40 default)
   so each cluster = one identity.
 - `faces/` images are reorganised into `person_1/`, `person_2/`, … subfolders.
 - Images where no face is detected move to `unknown_face/`.
 - Results are logged to `face_cluster_log.csv`.
 
-> **Tuning tip:** If the same person ends up in multiple folders, raise `eps` in `face_cluster.py` (default `0.50`, try `0.55`–`0.60`). If different people get merged into the same folder, lower it toward `0.40`.
+> **Tuning tip:** Use the **eps slider** in the UI and click **🔄 Re-cluster Faces** to re-run clustering instantly without reprocessing all images. Lower eps = stricter (more folders, less merging). Higher eps = more lenient (fewer folders, more merging). Default 0.40 works well for diverse collections.
 
 ---
 
