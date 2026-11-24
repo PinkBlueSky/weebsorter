@@ -100,6 +100,12 @@ def _pick_folders() -> tuple[Path, Path]:
 def main() -> None:
     _assert_tkinter()
 
+    # Load onnxruntime BEFORE the Windows folder dialogs. Shell extensions
+    # loaded by the dialog can pull an older msvcp140.dll into the process,
+    # which makes onnxruntime's DLL fail to initialise ("DLL initialization
+    # routine failed") if it is imported afterwards.
+    import onnxruntime  # noqa: F401, PLC0415
+
     input_folder, output_folder = _pick_folders()
 
     # Create the output folder if it does not exist.
